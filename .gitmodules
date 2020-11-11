@@ -1,0 +1,3 @@
+[submodule "DropGrad2"]
+	path = DropGrad2
+	url = https://github.com/szitha/Meta-learning_ProjX/
