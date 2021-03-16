@@ -1,10 +1,10 @@
-exp='maml-omniglot-5way-1shot-TEST'
+exp='maml-omniglot-5way-1shot-TEST_dup'
 dataset='omniglot'
 num_cls=5
 num_inst=1
 batch=4
 m_batch=32
-num_updates=600
+num_updates=1000
 num_inner_updates=5
 lr='1e-1'
 meta_lr='1e-3'
