@@ -3,9 +3,6 @@
 
 # ### Model
 
-# In[1]:
-
-
 import torch
 import torch.nn as nn
 import torch.nn.init as init
@@ -26,10 +23,6 @@ from time import sleep
 from collections import OrderedDict
 from more_itertools import chunked
 from PIL import Image
-
-
-# In[2]:
-
 
 n_shot = 1
 n_class = 5
@@ -148,11 +141,54 @@ def test(model, device, test_data_loader):
     return test_loss, test_acc
 
 
-# ### AugmentedDataset
-
-# In[3]:
+# ### Data processing for troubleshooting
 
 
+"""Dataset: For outerloop"""
+class OmniglotOriginDataset(Dataset):
+    def __init__(self, path_to_lang, n_class, train, train_index, transform):
+
+        self.data = []
+        self.path = path_to_lang
+        
+        labels = sorted(os.listdir(path_to_lang))[:n_class]
+        
+        for label_i, label in enumerate(labels):
+            path_to_label = os.path.join(path_to_lang, label)
+            chars = np.array(sorted(os.listdir(path_to_label)))
+            if train:
+                chars = chars[train_index]
+            else:
+                test_index = list(set(np.arange(20)) - set(train_index)) # omniglot has 20 images per character
+                chars = chars[test_index]
+            for char in chars:
+                path_to_char = os.path.join(path_to_label, char)
+                image = io.imread(path_to_char)
+                label_i = np.array(label_i)
+                self.data.append([image, label_i])
+            
+        self.transform = transform
+ 
+    def __len__(self):
+        return len(self.data)
+ 
+    def __getitem__(self, idx):
+        return self.transform(self.data[idx])
+
+class ToTensor(object):
+    def __call__(self, sample):
+        image, label = sample[0], sample[1]
+        image = image / 255
+        image = (image-0.92208)/0.25140
+        image = image.reshape([28,28, 1])
+        image = image.transpose((2, 0, 1))
+        image = np.array(image, np.float32)
+
+        return [torch.from_numpy(image), torch.from_numpy(label)]
+
+
+
+"""AugmentedDataset: For innerloop"""
 class OmniglotAugmentedDataset(Dataset):
     def __init__(self, path_to_chars, train, train_indices, transform):
 
@@ -196,11 +232,50 @@ class ToTensor(object):
         return [torch.from_numpy(image), torch.from_numpy(label)]
 
 
-# ### AugmentDataLoader
 
-# In[4]:
+"""DataLoader Test"""
+local_task_train_data_loader = DataLoader(
+    OmniglotOriginDataset("../data/omniglot_mini/images_background/Latin/", 
+                    n_class=n_class,
+                    train=True,
+                    train_index=[0],
+                    transform=transforms.Compose([
+                        ToTensor(),
+                    ])),
+    batch_size=batch_size, shuffle=True)
+
+print("local_task_train_data")
+print(local_task_train_data_loader.dataset.path)
+
+for data, target in local_task_train_data_loader: # only have one batch
+    plt.figure(figsize=(10,1))
+    for i, x in enumerate(data):
+        plt.subplot(1, batch_size, i+1); plt.imshow(x[0])
+    plt.show()
+    print("y_true:", target)
+    
+print("\nlocal_task_test_data")
+local_task_test_data_loader = DataLoader(
+    OmniglotOriginDataset("../data/omniglot_mini/images_background/Latin/", 
+                    n_class=n_class,
+                    train=False,
+                    train_index=[0],
+                    transform=transforms.Compose([
+                        ToTensor(),
+                    ])),
+    batch_size=batch_size, shuffle=True)
+
+for data, target in local_task_test_data_loader: # only have one batch
+    plt.figure(figsize=(10,1))
+    for i, x in enumerate(data):
+        plt.subplot(1, batch_size, i+1); plt.imshow(x[0])
+    plt.show()
+    print("y_true:", target)
+    break
 
 
+
+"""AugmentDataLoader Test"""
 train_indices = np.random.randint(20, size=(n_class, n_shot))
 
 path_to_chars = [
@@ -252,10 +327,56 @@ for data, target in local_task_test_data_loader: # only have one batch
     break
 
 
-# ### Taskset and TaskLoader classes
+# ### Lets (fit , task=Latin, n_class=10, n_shot=1)
 
-# In[5]:
 
+"""
+local_task_train_data_loader = DataLoader(
+    OmniglotOriginDataset("../data/omniglot_mini/images_background/Latin/", 
+                    n_class=n_class,
+                    train=True,
+                    train_index=[0],
+                    transform=transforms.Compose([
+                        ToTensor()
+                    ])),
+    batch_size=batch_size, shuffle=True)
+
+
+local_task_test_data_loader = DataLoader(
+    OmniglotOriginDataset("../data/omniglot_mini/images_background/Latin/", 
+                    n_class=n_class,
+                    train=False,
+                    train_index=[0],
+                    transform=transforms.Compose([
+                        ToTensor()
+                    ])),
+    batch_size=batch_size, shuffle=True)
+
+model = OmniglotNet(n_class=10).to(device)
+optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.5)
+
+with tqdm(range(10)) as _tqdm:
+    for epoch in _tqdm:
+        train_loss, train_acc = train(model, device, local_task_train_data_loader, optimizer, epoch)
+        test_loss, test_acc = test(model, device, local_task_test_data_loader)
+        _tqdm.set_postfix(OrderedDict(
+            epoch=epoch+1, 
+            train_loss=train_loss, train_acc=train_acc, 
+            test_loss=test_loss, test_acc=test_acc))
+        
+
+data, target = local_task_train_data_loader.__iter__().next()
+
+images = np.array(data).reshape(10,28,28)
+plt.figure(figsize=(10,1))
+[[plt.subplot(1,10,i+1), plt.imshow(img)] for i, img in enumerate(images)]; plt.show()
+
+print("y_pred:", torch.argmax(model(data.cuda()), 1).cpu())
+print("y_true:", target)
+"""
+
+
+# ### Loading tasks: Taskset and TaskLoader classes
 
 class Taskset(object):
     def __getitem__(self, index):
@@ -275,11 +396,50 @@ class TaskLoader(object):
         return len(self.taskset)
 
 
-# ### AugmentedTaskset
+"""OmniglotOriginTaskset: For outerloop"""
+class OmniglotOriginTaskset(Taskset):
+    def __init__(self, path_to_omniglot, n_class, n_shot, meta_train):
+        
+        if meta_train:
+            path_to_langs = os.path.join(path_to_omniglot, "images_background/")
+        else:
+            path_to_langs = os.path.join(path_to_omniglot, "images_evaluation/")
+        
+        langs = sorted(os.listdir(path_to_langs))
+        tasks = [os.path.join(path_to_langs, lang) for lang in langs]
+        tasks = [task for task in tasks if len(os.listdir(task))>=n_class]
+        self.tasks = tasks
+    
+    def __len__(self):
+        return len(self.tasks)
+    
+    def __getitem__(self, idx):
+        train_index=[np.random.randint(20)] #TODO chanege indices
+        return {"train":
+                DataLoader(
+                    OmniglotOriginDataset(self.tasks[idx], 
+                                    n_class=n_class,
+                                    train=True,
+                                    train_index=train_index,
+                                    transform=transforms.Compose([
+                                        ToTensor()
+                                    ])),
+                    batch_size=batch_size, shuffle=True), 
+                "test":
+                DataLoader(
+                    OmniglotOriginDataset(self.tasks[idx],
+                                    n_class=n_class,
+                                    train=False,
+                                    train_index=train_index,
+                                    transform=transforms.Compose([
+                                        ToTensor()
+                                    ])),
+                    batch_size=batch_size, shuffle=True),
+                "task": self.tasks[idx] 
+               }
 
-# In[6]:
 
-
+"""AugmentedTaskset: For innerloop"""
 class OmniglotAugmentedTaskset(Taskset):
     def __init__(self, path_to_omniglot, n_class, n_shot, meta_train):
         
@@ -327,11 +487,37 @@ class OmniglotAugmentedTaskset(Taskset):
                }
 
 
-# ### AugmentTaskLoader
+"""TaskLoader: Outerloop"""
+meta_train_task_loader = TaskLoader(
+    OmniglotOriginTaskset("../data/omniglot_mini/", meta_train=True, n_class=n_class, n_shot=n_shot)
+)
 
-# In[7]:
+print(len(meta_train_task_loader.taskset))
+
+for i, meta_train_task in enumerate(meta_train_task_loader):
+    print(meta_train_task["task"])
+    print("train")
+    local_task_train_data_loader = meta_train_task["train"]
+    for data, target in local_task_train_data_loader:
+        plt.figure(figsize=(10,1))
+        for j, x in enumerate(data):
+            plt.subplot(1, batch_size, j+1); plt.imshow(x[0])
+        plt.show()
+        print(target)
+    print("test")
+    local_task_train_data_loader = meta_train_task["test"]
+    for data, target in local_task_train_data_loader:
+        plt.figure(figsize=(10,1))
+        for j, x in enumerate(data):
+            plt.subplot(1, batch_size, j+1); plt.imshow(x[0])
+        plt.show()
+        print(target)
+        break
+    if i==1:
+        break
 
 
+"""AugmentTaskLoader: Innerloop"""
 meta_train_task_loader = TaskLoader(
     OmniglotAugmentedTaskset("../data/omniglot_mini/", meta_train=True, n_class=n_class, n_shot=n_shot)
 )
@@ -360,12 +546,7 @@ for i, meta_train_task in enumerate(meta_train_task_loader):
     break
 
 
-# ---
-
 # # MAML
-
-# In[8]:
-
 
 class MetaLearner(object):
     def __init__(self):
@@ -574,9 +755,6 @@ class MetaLearner(object):
         return np.mean(test_loss), np.mean(test_acc)
 
 
-# In[ ]:
-
-
 meta_learner = MetaLearner()
 
 # see normal few-shot learning
@@ -595,26 +773,17 @@ for epoch in range(10):
     print("# {}  (meta-test-task) test_loss: {:.6f}, test_acc: {:.6f}".format(
         epoch+1, test_loss, test_acc))
     
-    model_path = "../m/model-epoch_{:05}-train_loss_{:0.3f}-train_acc_{:0.3f}-test_loss_{:0.3f}-test_acc_{:0.3f}.pt".format(
+    model_path = "../model/model-epoch_{:05}-train_loss_{:0.3f}-train_acc_{:0.3f}-test_loss_{:0.3f}-test_acc_{:0.3f}.pt".format(
         epoch, train_loss, train_acc, test_loss, test_acc)
     
     meta_learner.save(model_path)
 #     meta_learner.load(model_path)
 
 
-# In[ ]:
 
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
+meta_test_hist = np.array([meta_test_task_test_loss, meta_test_task_test_acc])
+meta_test_hist.shape
+np.save("meta-test-hist.npy", meta_test_hist)
 
 
 
