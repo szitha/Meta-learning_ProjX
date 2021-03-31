@@ -763,7 +763,7 @@ for _ in range(1):
     print("# {}  (meta-test-task) test_loss: {:.6f}, test_acc: {:.6f}".format(
         0, test_loss, test_acc))
 
-for epoch in range(10):
+for epoch in range(50):
     
     train_loss, train_acc = meta_learner.meta_train()
     test_loss, test_acc = meta_learner.meta_test()
@@ -777,14 +777,7 @@ for epoch in range(10):
         epoch, train_loss, train_acc, test_loss, test_acc)
     
     meta_learner.save(model_path)
-#     meta_learner.load(model_path)
-
-
-
-meta_test_hist = np.array([meta_test_task_test_loss, meta_test_task_test_acc])
-meta_test_hist.shape
-np.save("meta-test-hist.npy", meta_test_hist)
-
+    #meta_learner.load(model_path)
 
 
 
