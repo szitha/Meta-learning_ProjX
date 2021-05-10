@@ -26,7 +26,7 @@ import pickle
 import pandas as pd
 
 
-data_path = "/home-mscluster/szita"
+data_path = "./"
 
 
 train_path = os.path.join(data_path, 'images_background')
